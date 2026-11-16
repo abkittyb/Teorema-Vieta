@@ -25,7 +25,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip autoconf automake autopoint gettext libtool pkg-config zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev lld
+          sudo apt-get install -y git zip unzip autoconf automake autopoint gettext libtool libtool-bin libltdl-dev pkg-config zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev lld
           python -m pip install git+https://github.com/kivy/buildozer@76bac28545c66bbcc671d49aca553a747d69608e Cython==0.29.34 setuptools legacy-cgi
       - name: Configure Android build
         env:
