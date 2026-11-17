@@ -73,6 +73,8 @@ jobs:
               shutil.rmtree(p)
           for p in root.glob('build-*/dists'):
               shutil.rmtree(p)
+          for p in root.rglob('*_mypyc.so'):
+              p.unlink()
           for site in root.glob('build-*/build/python-installs/*/*'):
               for pattern in ('chardet', 'chardet-*.dist-info', '*_mypyc.so'):
                   for p in site.glob(pattern):
@@ -100,11 +102,16 @@ jobs:
           sudo chmod 666 /dev/kvm
           export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          export PATH="$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$PATH"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          if [ ! -d "$ANDROID_HOME/cmdline-tools/latest" ]; then cp -a "$ANDROID_HOME/tools" "$ANDROID_HOME/cmdline-tools/latest"; fi
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           sdkmanager --sdk_root="$ANDROID_HOME" 'emulator' 'system-images;android-36;google_apis;x86_64'
           echo no | avdmanager create avd -n vieta-test -k 'system-images;android-36;google_apis;x86_64' --force
           "$ANDROID_HOME/emulator/emulator" -avd vieta-test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > diagnostics/emulator.log 2>&1 &
-          adb wait-for-device
+          emulator_pid=$!
+          sleep 5
+          kill -0 "$emulator_pid" || { cat diagnostics/emulator.log; exit 1; }
+          timeout 180 adb wait-for-device
           for i in $(seq 1 120); do
             if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then break; fi
             sleep 5
