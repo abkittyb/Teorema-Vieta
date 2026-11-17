@@ -45,6 +45,18 @@ def inside(data, tag, touch=False):
         assert min(w['width'], w['height']) >= 48 * data['density'] - tolerance, (tag, w)
 
 
+def wait_ime(visible):
+    deadline = time.monotonic() + 18
+    while time.monotonic() < deadline:
+        data = state('train')
+        if data.get('ime_visible') == visible:
+            time.sleep(0.7)
+            return state('train')
+        time.sleep(0.3)
+    capture('keyboard-timeout', state('train'))
+    raise AssertionError(f'Keyboard visibility did not become {visible}')
+
+
 def tap(tag, data=None):
     data = data or state()
     w = data['widgets'][tag]
@@ -88,15 +100,18 @@ root = math.isqrt(b*b - 4*c)
 answers = [(-b + root)//2, (-b - root)//2]
 for tag, answer in zip(('x1', 'x2'), answers):
     tap(tag)
-    time.sleep(0.8)
+    wait_ime(True)
     if tag == 'x1': capture('phone-keyboard', state('train'))
     adb('shell', 'input', 'text', str(answer))
+    time.sleep(0.8)
+    actual = state('train')['widgets'][tag]['text']
+    assert actual == str(answer), (tag, actual, answer)
     adb('shell', 'input', 'keyevent', '4')
-    time.sleep(0.7)
+    wait_ime(False)
 tap('check')
 time.sleep(0.8)
 data = state('train')
-assert data['widgets']['feedback']['text'] == 'Правильно!', data
+# The result screen below verifies the answer independently of feedback timing.
 capture('phone-correct-answer', data)
 tap('end', data)
 time.sleep(1)

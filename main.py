@@ -141,7 +141,7 @@ class TrainScreen(SafeScreen):
                           background_color=(1, 1, 1, 1), foreground_color=INK,
                           write_tab=False)
         entry.test_id = tag
-        entry.bind(focus=self._focus)
+        entry.bind(focus=self._focus, text=self._edited)
         row.add_widget(entry)
         minus = action('−', lambda *_: self.toggle_minus(entry), tag + '_minus', secondary=True)
         minus.size_hint_x = None
@@ -149,6 +149,11 @@ class TrainScreen(SafeScreen):
         row.add_widget(minus)
         self.body.add_widget(row)
         return entry
+
+    def _edited(self, *_):
+        app = App.get_running_app()
+        if app:
+            app.schedule_audit()
 
     def _focus(self, entry, focused):
         if focused:
@@ -268,6 +273,7 @@ class ResultsScreen(SafeScreen):
 class VietaApp(App):
     def build(self):
         self.ui_test = False
+        self.ime_visible = False
         if platform == 'android':
             from jnius import autoclass
             activity = autoclass('org.kivy.android.PythonActivity').mActivity
@@ -275,12 +281,15 @@ class VietaApp(App):
         self.sm = ScreenManager(transition=NoTransition())
         for cls, name in ((StartScreen, 'start'), (TrainScreen, 'train'), (ResultsScreen, 'results')):
             self.sm.add_widget(cls(name=name))
-        Window.bind(size=lambda *_: self.refresh_insets())
+        Window.bind(size=lambda *_: self.refresh_insets(),
+                    keyboard_height=lambda *_: self.refresh_insets())
         return self.sm
 
     def on_start(self):
         Clock.schedule_once(lambda dt: self.refresh_insets(), 0.2)
         Clock.schedule_once(lambda dt: self.refresh_insets(), 0.8)
+        if platform == 'android':
+            Clock.schedule_interval(lambda dt: self.refresh_insets(), 0.4)
 
     def on_resume(self):
         self.refresh_insets()
@@ -298,13 +307,21 @@ class VietaApp(App):
                 types = autoclass('android.view.WindowInsets$Type')
                 bars = insets.getInsets(types.systemBars() | types.displayCutout())
                 values = (bars.left, bars.top, bars.right, bars.bottom)
+                ime_visible = insets.isVisible(types.ime())
+                ime_bottom = insets.getInsets(types.ime()).bottom
+                native_height = activity.getWindowManager().getCurrentWindowMetrics().getBounds().height()
             except Exception:
                 # Conservative fallback for Android 7–10 and not-yet-attached views.
                 values = (0, dp(32), 0, dp(32))
-            Clock.schedule_once(lambda dt: self.apply_insets(values), 0)
+                ime_visible, ime_bottom, native_height = False, 0, 0
+            Clock.schedule_once(lambda dt: self.apply_insets(values, ime_visible, ime_bottom, native_height), 0)
         read()
 
-    def apply_insets(self, values):
+    def apply_insets(self, values, ime_visible=False, ime_bottom=0, native_height=0):
+        self.ime_visible = ime_visible
+        # Do not subtract the keyboard twice if SDL already resized the window.
+        overlap = max(0, ime_bottom - max(0, native_height - Window.height)) if ime_visible else 0
+        values = (values[0], values[1], values[2], max(values[3], overlap))
         for screen in self.sm.screens:
             screen._apply_insets(*values)
         self.schedule_audit()
@@ -326,7 +343,7 @@ class VietaApp(App):
                                     text=getattr(widget, 'text', ''), disabled=widget.disabled)
         Path(self.user_data_dir, 'ui-test.json').write_text(json.dumps(dict(
             screen=screen.name, width=Window.width, height=Window.height,
-            density=dp(1), padding=list(screen.shell.padding), widgets=widgets)))
+            ime_visible=self.ime_visible, density=dp(1), padding=list(screen.shell.padding), widgets=widgets)))
 
 
 if __name__ == '__main__':
