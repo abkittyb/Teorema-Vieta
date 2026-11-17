@@ -69,6 +69,8 @@ jobs:
           from pathlib import Path
           import shutil
           root = Path('.buildozer/android/platform')
+          for p in root.glob('build-*/build/venv'):
+              shutil.rmtree(p)
           for p in root.glob('build-*/dists'):
               shutil.rmtree(p)
           for site in root.glob('build-*/build/python-installs/*/*'):
