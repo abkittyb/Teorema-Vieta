@@ -117,8 +117,8 @@ class TrainScreen(SafeScreen):
         self.body.add_widget(text_label('Устно подберите корни', 21, True, 40))
         self.lbl_eq = text_label('', 28, True, 72, 'equation')
         self.body.add_widget(self.lbl_eq)
-        self.entry_x1 = self._root_row('x₁ =', 'x1')
-        self.entry_x2 = self._root_row('x₂ =', 'x2')
+        self.entry_x1 = self._root_row('x1 =', 'x1')
+        self.entry_x2 = self._root_row('x2 =', 'x2')
         self.btn_check = action('Проверить', self.check_answer, 'check')
         self.body.add_widget(self.btn_check)
         self.lbl_result = text_label('', 18, True, 64, 'feedback')
@@ -317,7 +317,7 @@ class VietaApp(App):
         for widget in screen.walk():
             tag = getattr(widget, 'test_id', None)
             if tag:
-                x, y = widget.to_window(0, 0, relative=True)
+                x, y = widget.to_window(widget.x, widget.y)
                 widgets[tag] = dict(x=x, y=Window.height-y-widget.height,
                                     width=widget.width, height=widget.height,
                                     text=getattr(widget, 'text', ''), disabled=widget.disabled)
