@@ -318,12 +318,20 @@ class VietaApp(App):
         read()
 
     def apply_insets(self, values, ime_visible=False, ime_bottom=0, native_height=0):
+        geometry = (tuple(values), ime_bottom, Window.height)
+        scroll_input = ime_visible and geometry != getattr(self, '_ime_geometry', None)
+        self._ime_geometry = geometry
         self.ime_visible = ime_visible
         # Do not subtract the keyboard twice if SDL already resized the window.
         overlap = max(0, ime_bottom - max(0, native_height - Window.height)) if ime_visible else 0
         values = (values[0], values[1], values[2], max(values[3], overlap))
         for screen in self.sm.screens:
             screen._apply_insets(*values)
+        if scroll_input:
+            train = self.sm.get_screen('train')
+            for entry in (train.entry_x1, train.entry_x2):
+                if entry.focus:
+                    Clock.schedule_once(lambda dt, e=entry: train.scroll.scroll_to(e, padding=dp(16)), 0.1)
         self.schedule_audit()
 
     def schedule_audit(self):
