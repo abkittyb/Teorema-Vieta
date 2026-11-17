@@ -1,304 +1,330 @@
-from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.clock import Clock
-from kivy.core.window import Window
+"""Тренажёр теоремы Виета. Адаптивный интерфейс для Android."""
+import json
 import random
 import time
+from pathlib import Path
 
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.core.window import Window
+from kivy.metrics import dp, sp
+from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.screenmanager import ScreenManager, Screen, NoTransition
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
+from kivy.utils import platform
+
+INK = (0.10, 0.20, 0.40, 1)
+MUTED = (0.25, 0.35, 0.50, 1)
+BLUE = (0.16, 0.48, 0.88, 1)
 Window.clearcolor = (0.85, 0.92, 1, 1)
-
-class StartScreen(Screen):
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        layout = BoxLayout(orientation="vertical", padding=40, spacing=30)
-
-        layout.add_widget(Label())
-
-        layout.add_widget(Label(text="Теорема Виета", font_size=55, bold=True, color=(0.1, 0.2, 0.4, 1), halign="center"))
-        layout.add_widget(Label(text="ax² + bx + c = 0", font_size=36, color=(0.2, 0.3, 0.5, 1), halign="center"))
-
-        layout.add_widget(Label(size_hint_y=None, height=50))
-
-        btn_start = Button(text="Начать", font_size=45, bold=True,
-                           size_hint=(None, None), size=(250, 90),
-                           pos_hint={'center_x': 0.5},
-                           background_normal='', background_color=(0.2, 0.6, 1, 1), color=(1,1,1,1))
-        btn_start.bind(on_press=self.go_to_train)
-        layout.add_widget(btn_start)
-
-        layout.add_widget(Label())
-        self.add_widget(layout)
-
-    def go_to_train(self, *args):
-        self.manager.current = "train"
-        self.manager.get_screen("train").start_game()
+Window.softinput_mode = 'resize'
 
 
-class TrainScreen(Screen):
-    def __init__(self, **kw):
-        super().__init__(**kw)
+def text_label(text='', size=20, bold=False, minimum=32, tag=None):
+    label = Label(text=text, font_size=sp(size), bold=bold, color=INK,
+                  halign='center', valign='middle', size_hint_y=None)
+    label.test_id = tag
+    def fit(*_):
+        label.text_size = (max(1, label.width), None)
+        label.height = max(dp(minimum), label.texture_size[1] + dp(8))
+    label.bind(width=fit, texture_size=fit)
+    fit()
+    return label
 
-        self.score_total = 0
-        self.total_attempts = 0
-        self.score_errors = 0
-        self.x1_correct = 0
-        self.x2_correct = 0
+
+def action(text, callback, tag, secondary=False):
+    button = Button(text=text, font_size=sp(20), bold=True,
+                    size_hint_y=None, height=dp(56), background_normal='',
+                    background_down='', background_color=(0.74, 0.84, 0.96, 1) if secondary else BLUE,
+                    color=INK if secondary else (1, 1, 1, 1))
+    button.test_id = tag
+    button.bind(on_release=callback)
+    return button
+
+
+class SafeScreen(Screen):
+    """System-bar insets surround a centred, scrollable content column."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.shell = BoxLayout(orientation='vertical', spacing=dp(16))
+        self.add_widget(self.shell)
+        self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(3),
+                                 scroll_type=['bars', 'content'])
+        self.shell.add_widget(self.scroll)
+        self.viewport = AnchorLayout(anchor_x='center', anchor_y='center', size_hint_y=None)
+        self.scroll.add_widget(self.viewport)
+        self.body = BoxLayout(orientation='vertical', size_hint=(None, None), spacing=dp(16))
+        self.viewport.add_widget(self.body)
+        self.body.bind(minimum_height=self._layout)
+        self.scroll.bind(size=self._layout)
+        self.viewport.bind(width=self._layout)
+        self._apply_insets(0, dp(28), 0, dp(28))
+        self.bind(on_enter=self._entered)
+
+    def _layout(self, *_):
+        self.body.width = min(self.scroll.width, dp(480))
+        self.body.height = self.body.minimum_height
+        self.viewport.height = max(self.scroll.height, self.body.height)
+
+    def _apply_insets(self, left, top, right, bottom):
+        self.shell.padding = [left + dp(20), top + dp(16), right + dp(20), bottom + dp(16)]
+        self._layout()
+
+    def add_footer(self, widget):
+        holder = AnchorLayout(size_hint_y=None, height=widget.height)
+        holder.add_widget(widget)
+        widget.size_hint_x = None
+        holder.bind(width=lambda *_: setattr(widget, 'width', min(holder.width, dp(480))))
+        self.shell.add_widget(holder)
+
+    def _entered(self, *_):
+        self.scroll.scroll_y = 1
+        app = App.get_running_app()
+        if app:
+            app.refresh_insets()
+            app.schedule_audit()
+
+
+class StartScreen(SafeScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.body.add_widget(text_label('Теорема Виета', 28, True, 56, 'title'))
+        self.body.add_widget(text_label('ax² + bx + c = 0', 24, minimum=48))
+        self.body.add_widget(text_label('Устно подберите два корня\nи проверьте свой ответ.', 17, minimum=64))
+        self.body.add_widget(action('Начать', self.go_to_train, 'start'))
+
+    def go_to_train(self, *_):
+        train = self.manager.get_screen('train')
+        train.start_game()
+        self.manager.current = 'train'
+
+
+class TrainScreen(SafeScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.score_total = self.total_attempts = self.score_errors = 0
+        self.x1_correct = self.x2_correct = 0
         self.start_time = 0
         self.timer_running = False
-
-        layout = BoxLayout(orientation="vertical", padding=[20, 30, 20, 30], spacing=15)
-
-        self.lbl_time = Label(text="Суммарное время: 00 мин 00 сек", font_size=24, bold=True, color=(0.1, 0.2, 0.4, 1), size_hint_y=None, height=50)
-        layout.add_widget(self.lbl_time)
-
-        layout.add_widget(Label(text="Устно подберите корни:", font_size=32, bold=True, color=(0.1, 0.2, 0.4, 1), size_hint_y=None, height=60))
-
-        self.lbl_eq = Label(text="x² + bx + c = 0", font_size=55, bold=True, color=(0.1, 0.2, 0.4, 1), size_hint_y=None, height=100)
-        layout.add_widget(self.lbl_eq)
-
-        layout.add_widget(Label(size_hint_y=None, height=10))
-
-        row1 = BoxLayout(size_hint_y=None, height=70, spacing=10)
-        row1.add_widget(Label())
-        row1.add_widget(Label(text="x1 =", font_size=40, bold=True, color=(0.1, 0.2, 0.4, 1), size_hint_x=None, width=90))
-        self.entry_x1 = TextInput(input_type="number", multiline=False, font_size=40, halign="center", background_color=(1,1,1,1), size_hint_x=None, width=100)
-        row1.add_widget(self.entry_x1)
-
-        btn_minus1 = Button(text="−", font_size=40, size_hint_x=None, width=60, background_normal='', background_color=(0.8, 0.9, 1, 1), color=(0,0,0,1), bold=True)
-        btn_minus1.bind(on_press=lambda *_: self.toggle_minus(self.entry_x1))
-        row1.add_widget(btn_minus1)
-        row1.add_widget(Label())
-        layout.add_widget(row1)
-
-        row2 = BoxLayout(size_hint_y=None, height=70, spacing=10)
-        row2.add_widget(Label())
-        row2.add_widget(Label(text="x2 =", font_size=40, bold=True, color=(0.1, 0.2, 0.4, 1), size_hint_x=None, width=90))
-        self.entry_x2 = TextInput(input_type="number", multiline=False, font_size=40, halign="center", background_color=(1,1,1,1), size_hint_x=None, width=100)
-        row2.add_widget(self.entry_x2)
-
-        btn_minus2 = Button(text="−", font_size=40, size_hint_x=None, width=60, background_normal='', background_color=(0.8, 0.9, 1, 1), color=(0,0,0,1), bold=True)
-        btn_minus2.bind(on_press=lambda *_: self.toggle_minus(self.entry_x2))
-        row2.add_widget(btn_minus2)
-        row2.add_widget(Label())
-        layout.add_widget(row2)
-
-        layout.add_widget(Label(size_hint_y=None, height=10))
-
-        check_container = BoxLayout(size_hint_y=None, height=80)
-        check_container.add_widget(Label())
-
-        self.btn_check = Button(text="Проверить", font_size=40, bold=True,
-                                size_hint_x=None, width=250,
-                                background_normal='', background_color=(0.2, 0.6, 1, 1), color=(1,1,1,1))
-        self.btn_check.bind(on_press=self.check_answer)
-
-        check_container.add_widget(self.btn_check)
-        check_container.add_widget(Label())
-        layout.add_widget(check_container)
-
-        self.result_container = BoxLayout(size_hint_y=None, height=130)
-        self.result_container.background_normal = ''
-        self.result_container.background_color = (0,0,0,0)
-
-        self.lbl_result = Label(text="", font_size=34, bold=True, halign="center", valign="middle")
-        self.lbl_result.bind(size=self.lbl_result.setter('text_size'))
-
-        self.result_container.add_widget(self.lbl_result)
-        layout.add_widget(self.result_container)
-
-        layout.add_widget(Label())
-
-        end_container = BoxLayout(size_hint_y=None, height=70)
-        end_container.add_widget(Label())
-
-        self.btn_end = Button(text="Завершить", font_size=32, bold=True,
-                              size_hint_x=None, width=200,
-                              background_normal='', background_color=(1, 0.5, 0.5, 1), color=(0,0,0,1))
-        self.btn_end.bind(on_press=self.end_game)
-
-        end_container.add_widget(self.btn_end)
-        end_container.add_widget(Label())
-        layout.add_widget(end_container)
-
-        self.add_widget(layout)
+        self.next_task_event = None
+        self.lbl_time = text_label('Время: 00:00', 17, minimum=32, tag='timer')
+        self.lbl_time.color = MUTED
+        self.body.add_widget(self.lbl_time)
+        self.body.add_widget(text_label('Устно подберите корни', 21, True, 40))
+        self.lbl_eq = text_label('', 28, True, 72, 'equation')
+        self.body.add_widget(self.lbl_eq)
+        self.entry_x1 = self._root_row('x₁ =', 'x1')
+        self.entry_x2 = self._root_row('x₂ =', 'x2')
+        self.btn_check = action('Проверить', self.check_answer, 'check')
+        self.body.add_widget(self.btn_check)
+        self.lbl_result = text_label('', 18, True, 64, 'feedback')
+        self.body.add_widget(self.lbl_result)
+        self.btn_end = action('Завершить', self.end_game, 'end', secondary=True)
+        self.add_footer(self.btn_end)
         self.disable_inputs()
         Clock.schedule_interval(self.update_timer, 1)
 
+    def _root_row(self, caption, tag):
+        row = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(12))
+        row.add_widget(Label(text=caption, font_size=sp(24), color=INK,
+                             size_hint_x=None, width=dp(62)))
+        entry = TextInput(multiline=False, input_type='number', input_filter='int',
+                          font_size=sp(24), halign='center', padding=[dp(12), dp(12)],
+                          background_normal='', background_active='',
+                          background_color=(1, 1, 1, 1), foreground_color=INK,
+                          write_tab=False)
+        entry.test_id = tag
+        entry.bind(focus=self._focus)
+        row.add_widget(entry)
+        minus = action('−', lambda *_: self.toggle_minus(entry), tag + '_minus', secondary=True)
+        minus.size_hint_x = None
+        minus.width = dp(56)
+        row.add_widget(minus)
+        self.body.add_widget(row)
+        return entry
+
+    def _focus(self, entry, focused):
+        if focused:
+            Clock.schedule_once(lambda dt: self.scroll.scroll_to(entry, padding=dp(16)), 0.3)
+
     def toggle_minus(self, entry):
-        if entry.disabled: return
-        if entry.text.startswith("-"): entry.text = entry.text[1:]
-        else: entry.text = "-" + entry.text
+        if not entry.disabled:
+            entry.text = entry.text[1:] if entry.text.startswith('-') else '-' + entry.text
+
+    def _cancel_next(self):
+        if self.next_task_event:
+            self.next_task_event.cancel()
+            self.next_task_event = None
 
     def start_game(self):
-        self.start_time = time.time()
+        self._cancel_next()
+        self.start_time = time.monotonic()
         self.timer_running = True
-        self.score_total = 0
-        self.score_errors = 0
-        self.total_attempts = 0
+        self.score_total = self.total_attempts = self.score_errors = 0
+        self.lbl_time.text = 'Время: 00:00'
         self.generate_task()
 
-    def generate_task(self):
-        self.lbl_result.text = ""
-        self.result_container.background_color = (0,0,0,0)
-
-        self.entry_x1.disabled = False
-        self.entry_x2.disabled = False
-        self.entry_x1.text = ""
-        self.entry_x2.text = ""
+    def generate_task(self, *_):
+        self.next_task_event = None
+        if not self.timer_running:
+            return
+        self.lbl_result.text = ''
+        for entry in (self.entry_x1, self.entry_x2):
+            entry.disabled = False
+            entry.text = ''
         self.btn_check.disabled = False
-
-        while True:
-            self.x1_correct = random.randint(-10, 10)
-            self.x2_correct = random.randint(-10, 10)
-            if self.x1_correct != 0 and self.x2_correct != 0:
-                break
-
+        self.x1_correct = random.choice([n for n in range(-10, 11) if n])
+        self.x2_correct = random.choice([n for n in range(-10, 11) if n])
         if random.random() < 0.2:
             self.x2_correct = self.x1_correct
-
         b = -(self.x1_correct + self.x2_correct)
         c = self.x1_correct * self.x2_correct
-
-        eq_str = "x²"
-
-        if b > 0:
-            eq_str += f" + {b}x"
-        elif b < 0:
-            eq_str += f" - {abs(b)}x"
-
-        if c > 0:
-            eq_str += f" + {c}"
-        elif c < 0:
-            eq_str += f" - {abs(c)}"
-
-        eq_str += " = 0"
-        self.lbl_eq.text = eq_str
+        equation = 'x²'
+        if b:
+            equation += f" {'+' if b > 0 else '−'} {abs(b)}x"
+        if c:
+            equation += f" {'+' if c > 0 else '−'} {abs(c)}"
+        self.lbl_eq.text = equation + ' = 0'
+        app = App.get_running_app()
+        if app:
+            app.schedule_audit()
 
     def check_answer(self, *_):
         try:
-            u_x1 = int(self.entry_x1.text)
-            u_x2 = int(self.entry_x2.text)
+            answers = [int(self.entry_x1.text), int(self.entry_x2.text)]
         except ValueError:
-            self.lbl_result.text = "Введите числа!"
-            self.lbl_result.color = (1,0,0,1)
+            self.lbl_result.text = 'Введите два целых числа'
+            self.lbl_result.color = (0.75, 0.12, 0.12, 1)
             return
-
         self.disable_inputs()
         self.total_attempts += 1
-
-        correct = ((u_x1 == self.x1_correct and u_x2 == self.x2_correct) or
-                   (u_x1 == self.x2_correct and u_x2 == self.x1_correct))
-
+        correct = sorted(answers) == sorted([self.x1_correct, self.x2_correct])
         if correct:
-            self.lbl_result.text = "Правильно"
-            self.lbl_result.color = (0, 0.7, 0, 1)
             self.score_total += 1
-            Clock.schedule_once(lambda dt: self.generate_task(), 1.5)
+            self.lbl_result.text = 'Правильно!'
+            self.lbl_result.color = (0.05, 0.45, 0.15, 1)
         else:
-            self.lbl_result.text = f"Неправильно\nВерные: {self.x1_correct} и {self.x2_correct}"
-            self.lbl_result.color = (0.9, 0, 0, 1)
             self.score_errors += 1
-            Clock.schedule_once(lambda dt: self.generate_task(), 3.0)
+            self.lbl_result.text = f'Неверно. Корни: {self.x1_correct} и {self.x2_correct}'
+            self.lbl_result.color = (0.75, 0.12, 0.12, 1)
+        self.next_task_event = Clock.schedule_once(self.generate_task, 1.5 if correct else 3)
+        App.get_running_app().schedule_audit()
 
     def disable_inputs(self):
-        self.entry_x1.disabled = True
-        self.entry_x2.disabled = True
+        for entry in (self.entry_x1, self.entry_x2):
+            entry.focus = False
+            entry.disabled = True
         self.btn_check.disabled = True
 
-    def update_timer(self, dt):
+    def update_timer(self, _):
         if self.timer_running:
-            elapsed = int(time.time() - self.start_time)
-            m = elapsed // 60
-            s = elapsed % 60
-            self.lbl_time.text = f"Суммарное время: {m:02d} мин {s:02d} сек"
+            elapsed = int(time.monotonic() - self.start_time)
+            self.lbl_time.text = f'Время: {elapsed // 60:02d}:{elapsed % 60:02d}'
 
     def end_game(self, *_):
         self.timer_running = False
+        self._cancel_next()
         self.disable_inputs()
-        elapsed = int(time.time() - self.start_time) if self.start_time else 0
-        results = self.manager.get_screen("results")
-        results.show_results(elapsed, self.total_attempts, self.score_total, self.score_errors)
-        self.manager.current = "results"
+        elapsed = int(time.monotonic() - self.start_time) if self.start_time else 0
+        self.manager.get_screen('results').show_results(
+            elapsed, self.total_attempts, self.score_total, self.score_errors)
+        self.manager.current = 'results'
 
 
-class ResultsScreen(Screen):
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        layout = BoxLayout(orientation="vertical", padding=[30, 50, 30, 50], spacing=20)
-
-        layout.add_widget(Label(text="Итоги:", font_size=55, bold=True, color=(0.1, 0.2, 0.4, 1), size_hint_y=None, height=80))
-
-        self.lbl_time = Label(text="Время:", font_size=34, bold=True, color=(0.1, 0.2, 0.4, 1), halign="left")
-        self.lbl_correct = Label(text="Верные ответы:", font_size=34, bold=True, color=(0.1, 0.2, 0.4, 1), halign="left")
-        self.lbl_errors = Label(text="Неверные ответы:", font_size=34, bold=True, color=(0.1, 0.2, 0.4, 1), halign="left")
-
-        layout.add_widget(self.lbl_time)
-        layout.add_widget(self.lbl_correct)
-        layout.add_widget(self.lbl_errors)
-
-        layout.add_widget(Label(text="Оценка:", font_size=40, bold=True, color=(0.1, 0.2, 0.4, 1), size_hint_y=None, height=70))
-
-        self.lbl_grade = Label(text="", font_size=120, bold=True, color=(0,0,0,1))
-        layout.add_widget(self.lbl_grade)
-
-        layout.add_widget(Label())
-
-        btn_container = BoxLayout(size_hint_y=None, height=80)
-        btn_container.add_widget(Label())
-
-        btn_resume = Button(text="Продолжить", font_size=40, bold=True,
-                            size_hint_x=None, width=250,
-                            background_normal='', background_color=(0.2, 0.6, 1, 1), color=(1,1,1,1))
-        btn_resume.bind(on_press=self.resume)
-
-        btn_container.add_widget(btn_resume)
-        btn_container.add_widget(Label())
-        layout.add_widget(btn_container)
-
-        self.add_widget(layout)
+class ResultsScreen(SafeScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.body.add_widget(text_label('Итоги тренировки', 27, True, 56, 'results_title'))
+        self.lbl_time = text_label('', 20, minimum=40)
+        self.lbl_correct = text_label('', 20, minimum=40, tag='correct_count')
+        self.lbl_errors = text_label('', 20, minimum=40, tag='error_count')
+        for label in (self.lbl_time, self.lbl_correct, self.lbl_errors):
+            self.body.add_widget(label)
+        self.body.add_widget(text_label('Оценка', 20, minimum=40))
+        self.lbl_grade = text_label('', 64, True, 96, 'grade')
+        self.body.add_widget(self.lbl_grade)
+        self.add_footer(action('Новая тренировка', self.resume, 'restart'))
 
     def show_results(self, time_sec, total_attempts, correct, errors):
-        m = time_sec // 60
-        s = time_sec % 60
-        self.lbl_time.text = f"Время: {m:02d} мин {s:02d} сек"
-        self.lbl_correct.text = f"Верные ответы: {correct}"
-        self.lbl_errors.text = f"Неверные ответы: {errors}"
-
-        if total_attempts == 0:
-            grade = 2
-        else:
-            percent = (correct / total_attempts) * 100
-            if percent >= 90: grade = 5
-            elif percent >= 70: grade = 4
-            elif percent >= 50: grade = 3
-            else: grade = 2
-
+        self.lbl_time.text = f'Время: {time_sec // 60:02d}:{time_sec % 60:02d}'
+        self.lbl_correct.text = f'Верные ответы: {correct}'
+        self.lbl_errors.text = f'Ошибки: {errors}'
+        percent = correct / total_attempts * 100 if total_attempts else 0
+        grade = 5 if percent >= 90 else 4 if percent >= 70 else 3 if percent >= 50 else 2
         self.lbl_grade.text = str(grade)
-
-        if grade == 5:
-            self.lbl_grade.color = (0, 0.8, 0, 1)
-        elif grade == 4:
-            self.lbl_grade.color = (0.9, 0.7, 0, 1)
-        elif grade == 3:
-            self.lbl_grade.color = (1, 0.5, 0, 1)
-        else:
-            self.lbl_grade.color = (1, 0, 0, 1)
+        self.lbl_grade.color = (0.05, 0.45, 0.15, 1) if grade >= 4 else (0.75, 0.30, 0.08, 1)
 
     def resume(self, *_):
-        self.manager.current = "start"
+        self.manager.current = 'start'
 
 
 class VietaApp(App):
     def build(self):
-        sm = ScreenManager()
-        sm.add_widget(StartScreen(name="start"))
-        sm.add_widget(TrainScreen(name="train"))
-        sm.add_widget(ResultsScreen(name="results"))
-        return sm
+        self.ui_test = False
+        if platform == 'android':
+            from jnius import autoclass
+            activity = autoclass('org.kivy.android.PythonActivity').mActivity
+            self.ui_test = activity.getIntent().getBooleanExtra('ui_test', False)
+        self.sm = ScreenManager(transition=NoTransition())
+        for cls, name in ((StartScreen, 'start'), (TrainScreen, 'train'), (ResultsScreen, 'results')):
+            self.sm.add_widget(cls(name=name))
+        Window.bind(size=lambda *_: self.refresh_insets())
+        return self.sm
 
-if __name__ == "__main__":
+    def on_start(self):
+        Clock.schedule_once(lambda dt: self.refresh_insets(), 0.2)
+        Clock.schedule_once(lambda dt: self.refresh_insets(), 0.8)
+
+    def on_resume(self):
+        self.refresh_insets()
+
+    def refresh_insets(self):
+        if platform != 'android':
+            return
+        from android.runnable import run_on_ui_thread
+        from jnius import autoclass
+        @run_on_ui_thread
+        def read():
+            try:
+                activity = autoclass('org.kivy.android.PythonActivity').mActivity
+                insets = activity.getWindow().getDecorView().getRootWindowInsets()
+                types = autoclass('android.view.WindowInsets$Type')
+                bars = insets.getInsets(types.systemBars() | types.displayCutout())
+                values = (bars.left, bars.top, bars.right, bars.bottom)
+            except Exception:
+                # Conservative fallback for Android 7–10 and not-yet-attached views.
+                values = (0, dp(32), 0, dp(32))
+            Clock.schedule_once(lambda dt: self.apply_insets(values), 0)
+        read()
+
+    def apply_insets(self, values):
+        for screen in self.sm.screens:
+            screen._apply_insets(*values)
+        self.schedule_audit()
+
+    def schedule_audit(self):
+        if getattr(self, 'ui_test', False):
+            Clock.schedule_once(self.audit_layout, 0.5)
+
+    def audit_layout(self, *_):
+        """Geometry is exported only when the CI launches with ui_test=true."""
+        screen = self.sm.current_screen
+        widgets = {}
+        for widget in screen.walk():
+            tag = getattr(widget, 'test_id', None)
+            if tag:
+                x, y = widget.to_window(0, 0, relative=True)
+                widgets[tag] = dict(x=x, y=Window.height-y-widget.height,
+                                    width=widget.width, height=widget.height,
+                                    text=getattr(widget, 'text', ''), disabled=widget.disabled)
+        Path(self.user_data_dir, 'ui-test.json').write_text(json.dumps(dict(
+            screen=screen.name, width=Window.width, height=Window.height,
+            density=dp(1), padding=list(screen.shell.padding), widgets=widgets)))
+
+
+if __name__ == '__main__':
     VietaApp().run()
