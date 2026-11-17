@@ -20,7 +20,11 @@ def state(screen=None):
     while time.monotonic() < deadline:
         try:
             value = json.loads(adb('exec-out', 'run-as', PACKAGE, 'cat', 'files/ui-test.json'))
-            if screen is None or value['screen'] == screen:
+            # Cold-start layout/audit can lag the first rendered frame on a busy emulator.
+            ready = value.get('widgets') and all(
+                widget['width'] >= 40 * value['density']
+                for widget in value['widgets'].values())
+            if ready and (screen is None or value['screen'] == screen):
                 return value
         except (subprocess.CalledProcessError, json.JSONDecodeError):
             pass
