@@ -46,8 +46,8 @@ jobs:
           source.dir = .
           source.include_exts = py,kv,png,jpg,atlas,ttf
           source.exclude_patterns = TR.Vieta.py
-          version = 0.1.1
-          requirements = python3,kivy==2.3.1,filetype==1.2.0,charset_normalizer==2.1.1
+          version = 0.1.2
+          requirements = python3,kivy==2.3.1,filetype==1.2.0,charset_normalizer==2.1.1,chardet==5.2.0
           orientation = portrait
           fullscreen = 0
           android.api = 36
@@ -62,7 +62,21 @@ jobs:
           warn_on_root = 1
           SPEC
           sed -i "s/TARGET_ARCH/$TARGET_ARCH/" buildozer.spec
-          echo "charset-normalizer==2.1.1" > android-constraints.txt
+          printf "charset-normalizer==2.1.1\nchardet==5.2.0\n" > android-constraints.txt
+      - name: Refresh cached Python packaging
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          root = Path('.buildozer/android/platform')
+          for p in root.glob('build-*/dists'):
+              shutil.rmtree(p)
+          for site in root.glob('build-*/build/python-installs/*/*'):
+              for pattern in ('chardet', 'chardet-*.dist-info', '*_mypyc.so'):
+                  for p in site.glob(pattern):
+                      if p.is_dir(): shutil.rmtree(p)
+                      else: p.unlink()
+          PY
       - name: Check Python syntax
         run: python -m py_compile main.py
       - name: Build debug APK
@@ -72,7 +86,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: vieta-0.1.1-${{ matrix.arch }}
+          name: vieta-0.1.2-${{ matrix.arch }}
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -82,7 +96,10 @@ jobs:
         run: |
           mkdir -p diagnostics
           sudo chmod 666 /dev/kvm
-          sdkmanager 'emulator' 'system-images;android-36;google_apis;x86_64'
+          export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$PATH"
+          sdkmanager --sdk_root="$ANDROID_HOME" 'emulator' 'system-images;android-36;google_apis;x86_64'
           echo no | avdmanager create avd -n vieta-test -k 'system-images;android-36;google_apis;x86_64' --force
           "$ANDROID_HOME/emulator/emulator" -avd vieta-test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > diagnostics/emulator.log 2>&1 &
           adb wait-for-device
