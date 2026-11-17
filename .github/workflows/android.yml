@@ -73,10 +73,10 @@ jobs:
               shutil.rmtree(p)
           for p in root.glob('build-*/dists'):
               shutil.rmtree(p)
-          for p in root.rglob('*_mypyc.so'):
+          for p in root.rglob('*mypyc*.so'):
               p.unlink()
           for site in root.glob('build-*/build/python-installs/*/*'):
-              for pattern in ('chardet', 'chardet-*.dist-info', '*_mypyc.so'):
+              for pattern in ('chardet', 'chardet-*.dist-info', '*mypyc*.so'):
                   for p in site.glob(pattern):
                       if p.is_dir(): shutil.rmtree(p)
                       else: p.unlink()
@@ -87,6 +87,35 @@ jobs:
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/android-constraints.txt
         run: buildozer -v android debug
+      - name: Verify APK dependency and 16 KB ELF alignment
+        run: |
+          python - <<'PY'
+          import glob, io, struct, tarfile, zipfile
+          def check(name, data):
+              if data[:4] != b'\x7fELF': return
+              pos = struct.unpack_from('<Q', data, 32)[0]
+              size, count = struct.unpack_from('<HH', data, 54)
+              for i in range(count):
+                  kind, flags, offset, va, pa, fs, ms, align = struct.unpack_from('<IIQQQQQQ', data, pos+i*size)
+                  if kind == 1:
+                      assert align >= 16384 and offset % 16384 == va % 16384, name
+          for path in glob.glob('bin/*.apk'):
+              with zipfile.ZipFile(path) as apk:
+                  assert apk.testzip() is None
+                  found = False
+                  for name in apk.namelist():
+                      if not name.startswith('lib/') or not name.endswith('.so'): continue
+                      data = apk.read(name)
+                      if 'libpybundle' not in name:
+                          check(name, data)
+                      else:
+                          with tarfile.open(fileobj=io.BytesIO(data)) as bundle:
+                              for m in bundle.getmembers():
+                                  if '/filetype/__init__.pyc' in m.name: found = True
+                                  if m.isfile() and m.name.endswith('.so'): check(m.name, bundle.extractfile(m).read())
+                  assert found, 'filetype is missing'
+                  print(path, 'PASS: filetype and 16 KB ELF alignment')
+          PY
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
