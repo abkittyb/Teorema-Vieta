@@ -61,9 +61,9 @@ def launch(width, height, density, scale, prefix):
     data = state('start')
     time.sleep(1.5)
     data = state('start')
+    capture(prefix + '-start', data)
     inside(data, 'title')
     inside(data, 'start', True)
-    capture(prefix + '-start', data)
     tap('start', data)
     time.sleep(1)
     data = state('train')
@@ -73,6 +73,7 @@ def launch(width, height, density, scale, prefix):
     return data
 
 
+adb('shell', 'settings', 'put', 'secure', 'show_ime_with_hard_keyboard', '1')
 adb('logcat', '-c')
 data = launch(1080, 2400, 420, 1.0, 'phone')
 for tag in ('x1', 'x2', 'check'):

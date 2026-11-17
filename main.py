@@ -63,10 +63,11 @@ class SafeScreen(Screen):
         self.scroll.bind(size=self._layout)
         self.viewport.bind(width=self._layout)
         self._apply_insets(0, dp(28), 0, dp(28))
-        self.bind(on_enter=self._entered)
+        self.bind(on_enter=self._entered, size=self._layout)
 
     def _layout(self, *_):
-        self.body.width = min(self.scroll.width, dp(480))
+        available = max(dp(1), self.width - self.shell.padding[0] - self.shell.padding[2])
+        self.body.width = min(available, dp(480))
         self.body.height = self.body.minimum_height
         self.viewport.height = max(self.scroll.height, self.body.height)
 
@@ -83,6 +84,8 @@ class SafeScreen(Screen):
 
     def _entered(self, *_):
         self.scroll.scroll_y = 1
+        Clock.schedule_once(self._layout, 0)
+        Clock.schedule_once(self._layout, 0.2)
         app = App.get_running_app()
         if app:
             app.refresh_insets()
