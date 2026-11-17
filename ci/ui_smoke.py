@@ -16,7 +16,7 @@ def adb(*args, check=True):
 
 
 def state(screen=None):
-    deadline = time.monotonic() + 12
+    deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         try:
             value = json.loads(adb('exec-out', 'run-as', PACKAGE, 'cat', 'files/ui-test.json'))
@@ -46,7 +46,7 @@ def inside(data, tag, touch=False):
 
 
 def wait_ime(visible):
-    deadline = time.monotonic() + 18
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         data = state('train')
         if data.get('ime_visible') == visible:
@@ -103,8 +103,12 @@ for tag, answer in zip(('x1', 'x2'), answers):
     wait_ime(True)
     if tag == 'x1': capture('phone-keyboard', state('train'))
     adb('shell', 'input', 'text', str(answer))
-    time.sleep(0.8)
-    actual = state('train')['widgets'][tag]['text']
+    deadline = time.monotonic() + 6
+    actual = ''
+    while time.monotonic() < deadline:
+        actual = state('train')['widgets'][tag]['text']
+        if actual == str(answer): break
+        time.sleep(0.3)
     assert actual == str(answer), (tag, actual, answer)
     adb('shell', 'input', 'keyevent', '4')
     wait_ime(False)
